@@ -6,6 +6,7 @@ DB_PATH = os.getenv("DB_PATH", "tesla_scanner.db")
 
 
 def get_conn() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
