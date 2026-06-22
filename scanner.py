@@ -1,7 +1,7 @@
 import argparse
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 SCAN_INTERVAL_SECONDS = 3600   # hourly
 WEEKLY_WINDOW_HOURS = 24       # weekly-SMA alerts repeat for this long after a hit
+IST = timezone(timedelta(hours=5, minutes=30))  # snapshot headers shown in IST
 
 
 def _process_weekly_sma(conn, symbol, period, sma, price, now):
@@ -106,7 +107,7 @@ def scan_once(conn) -> None:
     if alert_lines:
         alerts._send_discord("\n".join(alert_lines))
 
-    ts_str = now.strftime("%d %b %Y %H:%M UTC")
+    ts_str = now.astimezone(IST).strftime("%d %b %Y %H:%M IST")
     alerts._send_discord(alerts.format_snapshot("1D", snap_1d, ts_str))
     alerts._send_discord(alerts.format_snapshot("4H", snap_4h, ts_str))
 

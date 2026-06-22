@@ -59,10 +59,33 @@ def sr_line(symbol: str, cond: dict) -> str:
 
 # ── Monitoring snapshot tables (display only — never alert) ───────────────────
 
-_SNAP_FMT = "{:<5}{:<10}{:<7}{:<7}{:<7}{:<7}{:<6}{:<6}{:<7}{:<6}"
-_SNAP_HEADER = _SNAP_FMT.format(
-    "Pair", "Price", "SMA50", "SMA100", "SMA200", "SMA300", "Vol", "RSI", "StochK", "StochD"
-)
+# (header, column width). Flaggable columns are padded wide enough to leave room
+# for a 🔴 flag, which renders ~2 monospace cells.
+_COLS = [
+    ("Pair", 5), ("Price", 10),
+    ("SMA50", 8), ("SMA100", 8), ("SMA200", 8), ("SMA300", 8),
+    ("Vol", 8), ("RSI", 8), ("StochK", 8), ("StochD", 8),
+]
+
+FLAG = "🔴"
+
+# SMA-distance flag threshold (|distance| <= this); tighter for BTC/TRX per spec.
+_SMA_FLAG_PCT = {"BTCUSDT": 0.5, "TRXUSDT": 0.5}
+_SMA_FLAG_DEFAULT = 1.0
+
+
+def _vlen(s: str) -> int:
+    """Monospace display width; the 🔴 flag renders ~2 cells but len() counts 1."""
+    return len(s) + s.count(FLAG)
+
+
+def _cell(s: str, width: int) -> str:
+    """Left-justify to a display width that accounts for the wide 🔴 flag."""
+    return s + " " * max(1, width - _vlen(s))
+
+
+def _row(cells: list) -> str:
+    return "".join(_cell(c, w) for c, (_, w) in zip(cells, _COLS)).rstrip()
 
 
 def _fmt_table_price(p) -> str:
@@ -75,35 +98,54 @@ def _fmt_table_price(p) -> str:
     return f"{p:.4f}"
 
 
-def _dist(sma, price) -> str:
-    """Signed % distance of the SMA from price: (sma - price) / price * 100."""
+def _dist_cell(sma, price, flag_pct: float) -> str:
+    """Signed % distance of the SMA from price, flagged if |distance| <= flag_pct."""
     if sma is None or not price:
         return "n/a"
-    return f"{(sma - price) / price * 100:+.1f}%"
+    dist = (sma - price) / price * 100
+    s = f"{dist:+.1f}%"
+    return FLAG + s if abs(dist) <= flag_pct else s
 
 
-def _fmt_num(v, decimals: int) -> str:
+def _vol_cell(v) -> str:
     if v is None:
         return "n/a"
-    return f"{v:.{decimals}f}"
+    s = f"{v:.2f}"
+    return FLAG + s if v > 2.0 else s
+
+
+def _rsi_cell(v) -> str:
+    if v is None:
+        return "n/a"
+    s = f"{v:.1f}"
+    return FLAG + s if (v < 30 or v > 70) else s
+
+
+def _stoch_cell(v) -> str:
+    if v is None:
+        return "n/a"
+    s = f"{v:.1f}"
+    return FLAG + s if (v < 20 or v > 80) else s
 
 
 def format_snapshot(tf_label: str, rows: list, ts_str: str) -> str:
     """rows = list of (symbol, current_price, indicator_dict). One live price is
-    used for both tables so the same coin can't show two different prices."""
-    lines = [_SNAP_HEADER]
+    used for both tables so the same coin can't show two different prices.
+    Values that breach their threshold are prefixed with 🔴."""
+    lines = [_row([name for name, _ in _COLS])]
     for symbol, price, d in rows:
-        lines.append(_SNAP_FMT.format(
+        flag_pct = _SMA_FLAG_PCT.get(symbol, _SMA_FLAG_DEFAULT)
+        lines.append(_row([
             symbol.replace("USDT", ""),
             _fmt_table_price(price),
-            _dist(d.get("sma50"), price),
-            _dist(d.get("sma100"), price),
-            _dist(d.get("sma200"), price),
-            _dist(d.get("sma300"), price),
-            _fmt_num(d.get("volume_ratio"), 2),
-            _fmt_num(d.get("rsi"), 1),
-            _fmt_num(d.get("stochrsi_k"), 1),
-            _fmt_num(d.get("stochrsi_d"), 1),
-        ))
+            _dist_cell(d.get("sma50"), price, flag_pct),
+            _dist_cell(d.get("sma100"), price, flag_pct),
+            _dist_cell(d.get("sma200"), price, flag_pct),
+            _dist_cell(d.get("sma300"), price, flag_pct),
+            _vol_cell(d.get("volume_ratio")),
+            _rsi_cell(d.get("rsi")),
+            _stoch_cell(d.get("stochrsi_k")),
+            _stoch_cell(d.get("stochrsi_d")),
+        ]))
     table = "\n".join(lines)
     return f"📊 {tf_label} SNAPSHOT — {ts_str}\n```\n{table}\n```"
