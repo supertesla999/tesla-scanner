@@ -46,6 +46,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             stage      INTEGER NOT NULL,
             PRIMARY KEY (symbol, timeframe, level_name, stage)
         );
+        CREATE TABLE IF NOT EXISTS weekly_sma_hits (
+            symbol       TEXT NOT NULL,
+            sma_period   INTEGER NOT NULL,
+            first_hit_ts TEXT NOT NULL,
+            PRIMARY KEY (symbol, sma_period)
+        );
     """)
     conn.commit()
 
@@ -103,5 +109,31 @@ def clear_alert(conn: sqlite3.Connection, symbol: str, timeframe: str,
     conn.execute(
         "DELETE FROM alert_state WHERE symbol=? AND timeframe=? AND level_name=? AND stage=?",
         (symbol, timeframe, level_name, stage),
+    )
+    conn.commit()
+
+
+# ── Weekly-SMA hit tracking (separate from alert_state; 24h re-emit window) ────
+
+def get_weekly_hit(conn: sqlite3.Connection, symbol: str, sma_period: int):
+    row = conn.execute(
+        "SELECT first_hit_ts FROM weekly_sma_hits WHERE symbol=? AND sma_period=?",
+        (symbol, sma_period),
+    ).fetchone()
+    return row["first_hit_ts"] if row else None
+
+
+def set_weekly_hit(conn: sqlite3.Connection, symbol: str, sma_period: int, ts: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO weekly_sma_hits (symbol, sma_period, first_hit_ts) VALUES (?,?,?)",
+        (symbol, sma_period, ts),
+    )
+    conn.commit()
+
+
+def clear_weekly_hit(conn: sqlite3.Connection, symbol: str, sma_period: int) -> None:
+    conn.execute(
+        "DELETE FROM weekly_sma_hits WHERE symbol=? AND sma_period=?",
+        (symbol, sma_period),
     )
     conn.commit()

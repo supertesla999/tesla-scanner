@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 
 BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/price"
 
 
 def fetch_ohlcv(symbol: str, interval: str, limit: int = 350) -> pd.DataFrame:
@@ -23,6 +24,13 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int = 350) -> pd.DataFrame:
     return df.iloc[:-1].reset_index(drop=True)  # drop the currently-forming candle
 
 
+def fetch_price(symbol: str) -> float:
+    """Live current price — identical across all timeframes."""
+    resp = requests.get(BINANCE_TICKER, params={"symbol": symbol}, timeout=15)
+    resp.raise_for_status()
+    return float(resp.json()["price"])
+
+
 def _sma(series: pd.Series, n: int) -> pd.Series:
     return series.rolling(n).mean()
 
@@ -35,7 +43,8 @@ def _rsi(close: pd.Series, period: int = 14) -> float:
     return round(float(val), 2)
 
 
-def _stochrsi_k(close: pd.Series, rsi_period: int = 14, window: int = 14, smooth1: int = 3) -> float:
+def _stochrsi_kd(close: pd.Series, rsi_period: int = 14, window: int = 14,
+                 smooth_k: int = 3, smooth_d: int = 3) -> tuple:
     delta = close.diff()
     gain = delta.clip(lower=0).ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
     loss = (-delta.clip(upper=0)).ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
@@ -43,8 +52,9 @@ def _stochrsi_k(close: pd.Series, rsi_period: int = 14, window: int = 14, smooth
     lo = rsi.rolling(window).min()
     hi = rsi.rolling(window).max()
     stoch = (rsi - lo) / (hi - lo) * 100
-    k = stoch.rolling(smooth1).mean()
-    return round(float(k.iloc[-1]), 2)
+    k = stoch.rolling(smooth_k).mean()
+    d = k.rolling(smooth_d).mean()
+    return round(float(k.iloc[-1]), 2), round(float(d.iloc[-1]), 2)
 
 
 def _vol_ratio(volume: pd.Series, period: int = 20) -> float:
@@ -66,6 +76,7 @@ def compute_indicators(symbol: str, interval: str) -> dict:
     s100 = _sma(close, 100)
     s200 = _sma(close, 200)
     s300 = _sma(close, 300)
+    _k, _d = _stochrsi_kd(close)
 
     return {
         "price":        float(close.iloc[-1]),
@@ -81,6 +92,7 @@ def compute_indicators(symbol: str, interval: str) -> dict:
         "prev_sma200":  _safe(float(s200.iloc[-2])),
         "prev_sma300":  _safe(float(s300.iloc[-2])),
         "rsi":          _safe(_rsi(close)),
-        "stochrsi_k":   _safe(_stochrsi_k(close)),
+        "stochrsi_k":   _safe(_k),
+        "stochrsi_d":   _safe(_d),
         "volume_ratio": _safe(_vol_ratio(volume)),
     }

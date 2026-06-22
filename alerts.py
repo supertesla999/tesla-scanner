@@ -14,20 +14,6 @@ def _fmt_price(p: float) -> str:
     return f"${p:.6f}"
 
 
-def _ctx(d4h: dict, d1d: dict) -> str:
-    return (
-        f"RSI: {d4h['rsi']} (4H) / {d1d['rsi']} (1D)\n"
-        f"StochRSI: {d4h['stochrsi_k']} (4H) / {d1d['stochrsi_k']} (1D)\n"
-        f"Vol: {d4h['volume_ratio']}x (4H) / {d1d['volume_ratio']}x (1D)"
-    )
-
-
-def _send(text: str) -> None:
-    """Send to all configured notification channels."""
-    _send_telegram(text)
-    _send_discord(text)
-
-
 def _send_telegram(text: str) -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -51,47 +37,73 @@ def _send_discord(text: str) -> None:
         log.error("Discord %s: %s", resp.status_code, resp.text[:200])
 
 
-def send_ma_alert(symbol: str, tf: str, cond: dict, d4h: dict, d1d: dict) -> None:
+# ── Alert lines (flat — no priority tiers) ────────────────────────────────────
+
+def weekly_sma_line(symbol: str, period: int, elapsed_hours: float) -> str:
+    name = symbol.replace("USDT", "")
+    hrs = int(round(elapsed_hours))
+    when = "just now" if hrs <= 0 else f"{hrs}h ago"
+    return f"🚨 {name} — Weekly SMA{period} hit ({when})"
+
+
+def sr_line(symbol: str, cond: dict) -> str:
+    name = symbol.replace("USDT", "")
     price_str = _fmt_price(cond["level_price"])
-    dist = cond["distance_pct"]
-    direction = "above" if dist > 0 else "below"
-
-    if cond["stage"] == 1:
-        header = f"⚠️ {symbol} — {tf}"
-        body = (
-            f"Approaching: {cond['level_name']} @ {price_str}\n"
-            f"Distance: {abs(dist):.2f}% {direction}"
-        )
-    else:
-        header = f"🔴 {symbol} — {tf}"
-        body = f"HIT: {cond['level_name']} @ {price_str}"
-
-    _send(f"{header}\n{body}\n{_ctx(d4h, d1d)}")
-
-
-def send_sr_alert(symbol: str, cond: dict, d4h: dict, d1d: dict) -> None:
-    price_str = _fmt_price(cond["level_price"])
-    dist = cond["distance_pct"]
-    direction = "above" if dist > 0 else "below"
     role = cond["role"]
-
+    dist = cond["distance_pct"]
+    direction = "above" if dist > 0 else "below"
     if cond["stage"] == 1:
-        header = f"⚠️ {symbol}"
-        body = (
-            f"Approaching {role}: {price_str}\n"
-            f"Distance: {abs(dist):.2f}% {direction}"
-        )
-    else:
-        header = f"🔴 {symbol}"
-        body = f"HIT {role}: {price_str}"
-
-    _send(f"{header}\n{body}\n{_ctx(d4h, d1d)}")
+        return f"🚨 {name} — Approaching {role} {price_str} ({abs(dist):.2f}% {direction})"
+    return f"🚨 {name} — HIT {role} {price_str}"
 
 
-def send_crossover_alert(symbol: str, tf: str, cross: dict, d4h: dict, d1d: dict) -> None:
-    is_bull = cross["direction"] == "bullish"
-    emoji = "🟢" if is_bull else "🔴"
-    side = "above" if is_bull else "below"
-    header = f"{emoji} {symbol} — {tf}"
-    body = f"{cross['direction'].capitalize()} Cross: SMA{cross['fast']} crossed {side} SMA{cross['slow']}"
-    _send(f"{header}\n{body}\n{_ctx(d4h, d1d)}")
+# ── Monitoring snapshot tables (display only — never alert) ───────────────────
+
+_SNAP_FMT = "{:<5}{:<10}{:<7}{:<7}{:<7}{:<7}{:<6}{:<6}{:<7}{:<6}"
+_SNAP_HEADER = _SNAP_FMT.format(
+    "Pair", "Price", "SMA50", "SMA100", "SMA200", "SMA300", "Vol", "RSI", "StochK", "StochD"
+)
+
+
+def _fmt_table_price(p) -> str:
+    if p is None:
+        return "n/a"
+    if p >= 1000:
+        return f"{p:,.0f}"
+    if p >= 1:
+        return f"{p:,.2f}"
+    return f"{p:.4f}"
+
+
+def _dist(sma, price) -> str:
+    """Signed % distance of the SMA from price: (sma - price) / price * 100."""
+    if sma is None or not price:
+        return "n/a"
+    return f"{(sma - price) / price * 100:+.1f}%"
+
+
+def _fmt_num(v, decimals: int) -> str:
+    if v is None:
+        return "n/a"
+    return f"{v:.{decimals}f}"
+
+
+def format_snapshot(tf_label: str, rows: list, ts_str: str) -> str:
+    """rows = list of (symbol, current_price, indicator_dict). One live price is
+    used for both tables so the same coin can't show two different prices."""
+    lines = [_SNAP_HEADER]
+    for symbol, price, d in rows:
+        lines.append(_SNAP_FMT.format(
+            symbol.replace("USDT", ""),
+            _fmt_table_price(price),
+            _dist(d.get("sma50"), price),
+            _dist(d.get("sma100"), price),
+            _dist(d.get("sma200"), price),
+            _dist(d.get("sma300"), price),
+            _fmt_num(d.get("volume_ratio"), 2),
+            _fmt_num(d.get("rsi"), 1),
+            _fmt_num(d.get("stochrsi_k"), 1),
+            _fmt_num(d.get("stochrsi_d"), 1),
+        ))
+    table = "\n".join(lines)
+    return f"📊 {tf_label} SNAPSHOT — {ts_str}\n```\n{table}\n```"

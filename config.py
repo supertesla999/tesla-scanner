@@ -1,10 +1,13 @@
 PAIRS = {
-    "BTCUSDT":  {"threshold_pct": 0.5},
-    "ETHUSDT":  {"threshold_pct": 1.0},
-    "BNBUSDT":  {"threshold_pct": 1.0},
-    "SOLUSDT":  {"threshold_pct": 1.0},
-    "TRXUSDT":  {"threshold_pct": 1.0},
+    "BTCUSDT":  {"sr_threshold_pct": 0.5},
+    "ETHUSDT":  {"sr_threshold_pct": 1.0},
+    "BNBUSDT":  {"sr_threshold_pct": 1.0},
+    "SOLUSDT":  {"sr_threshold_pct": 1.0},
+    "TRXUSDT":  {"sr_threshold_pct": 0.5},
 }
+
+# Weekly-SMA alerts use one flat proximity threshold for every pair.
+WEEKLY_SMA_THRESHOLD_PCT = 1.0
 
 TIMEFRAMES = ["4h", "1d", "1w"]
 
